@@ -1,0 +1,39 @@
+# app.yaml — Google App Engine (Standard, Node.js 20)
+# Deploy: gcloud app deploy
+runtime: nodejs20
+
+env: standard
+
+instance_class: F2
+
+automatic_scaling:
+  min_instances: 0
+  max_instances: 3
+  target_cpu_utilization: 0.65
+
+entrypoint: npx serve -s dist -l $PORT
+
+env_variables:
+  NODE_ENV: production
+
+handlers:
+  - url: /assets/.*
+    static_files: dist/assets/\1
+    upload: dist/assets/.*
+    secure: always
+    expiration: "365d"
+
+  - url: /.*
+    static_files: dist/index.html
+    upload: dist/index.html
+    secure: always
+    http_headers:
+      X-Frame-Options: DENY
+      X-Content-Type-Options: nosniff
+      Referrer-Policy: strict-origin-when-cross-origin
+
+skip_files:
+  - ^node_modules/
+  - ^src/
+  - ^\.env.*
+  - ^\.git/
