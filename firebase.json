@@ -6,7 +6,55 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "headers": [
+      {
+        "source": "**/*.@(js|jsx|ts|tsx)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "max-age=31536000"
+          }
+        ]
+      },
+      {
+        "source": "**",
+        "headers": [
+          {
+            "key": "X-Frame-Options",
+            "value": "SAMEORIGIN"
+          },
+          {
+            "key": "X-Content-Type-Options",
+            "value": "nosniff"
+          },
+          {
+            "key": "Referrer-Policy",
+            "value": "strict-origin-when-cross-origin"
+          },
+          {
+            "key": "Permissions-Policy",
+            "value": "geolocation=(), microphone=()"
+          }
+        ]
+      }
+    ],
     "rewrites": [
+      {
+        "source": "/api/crowdPredict",
+        "function": "crowdPredict"
+      },
+      {
+        "source": "/api/routeOptimise",
+        "function": "routeOptimise"
+      },
+      {
+        "source": "/api/alertRouter",
+        "function": "alertRouter"
+      },
+      {
+        "source": "/api/exitWave",
+        "function": "exitWave"
+      },
       {
         "source": "**",
         "destination": "/index.html"
@@ -15,5 +63,9 @@
   },
   "database": {
     "rules": "database.rules.json"
+  },
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs18"
   }
 }

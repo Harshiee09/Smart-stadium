@@ -28,9 +28,8 @@ const WALK_TIMES = {
   west: { F1: 4, F2: 4, F3: 5, F4: 5, F5: 1, F6: 1, F7: 4, F8: 4 },
 }
 
-// Toilet walk time from each stand (minutes)
 const TOILET_WALK = { north: 1, south: 1, east: 2, west: 2 }
-const TOILET_USE = 2  // avg minutes in toilet
+const TOILET_USE = 2
 
 const VIEW_DATA = {
   north: { rating: 4.9, reviews: 1842, description: "The best view in the stadium. You're looking directly down the pitch from behind the goal City FC attack in the second half. Rows 12–18 are the sweet spot.", atmosphere: 'Loudest section. Non-stop chanting, drums, flags. You will lose your voice.', sightlines: 'Clear view of both penalty areas. Slight angle on the far goal but excellent overall.', tip: 'Rows 12–18 are rated best. Avoid rows 1–3 — too low, hard to see over standing fans.' },
@@ -46,7 +45,7 @@ const FAN_ATMOSPHERE = {
   west: { score: 78, label: 'Lively', description: "Mix of passionate home fans and neutrals. Great atmosphere without the intensity of the North end." },
 }
 
-// ── Travel time helper ────────────────────────────────────────
+// ── Travel time helpers ───────────────────────────────────────
 
 const GATE_WALK = { north: 4, south: 4, east: 5, west: 4 }
 const PARKING_WALK = { north: 6, south: 7, east: 8, west: 7 }
@@ -55,35 +54,30 @@ const STAND_LOT = { north: 'P1', south: 'P3', east: 'P2', west: 'P4' }
 const STAND_GATE = { north: 'A', south: 'D', east: 'B', west: 'E' }
 
 /**
- * Detect exit/leave intent — when someone plans to LEAVE the stadium,
- * possibly stopping at a stall on the way out.
- * This must be checked BEFORE food round-trip logic.
+ * Detect exit/leave intent — when someone plans to LEAVE the stadium.
+ * @param {string} q - lowercased query
+ * @returns {boolean}
  */
 function detectExitIntent(q) {
   return (
-    q.includes('leave the stadium') ||
-    q.includes('leaving the stadium') ||
-    q.includes('leave after') ||
-    q.includes('head out') ||
-    q.includes('head home') ||
-    q.includes('go home') ||
-    q.includes('going home') ||
-    q.includes('on my way out') ||
-    q.includes('on the way out') ||
-    q.includes('before i leave') ||
-    q.includes('before leaving') ||
-    q.includes('then leave') ||
-    q.includes('and leave') ||
-    q.includes('then exit') ||
-    q.includes('and exit') ||
-    q.includes('walk out') ||
+    q.includes('leave the stadium') || q.includes('leaving the stadium') ||
+    q.includes('leave after') || q.includes('head out') ||
+    q.includes('head home') || q.includes('go home') ||
+    q.includes('going home') || q.includes('on my way out') ||
+    q.includes('on the way out') || q.includes('before i leave') ||
+    q.includes('before leaving') || q.includes('then leave') ||
+    q.includes('and leave') || q.includes('then exit') ||
+    q.includes('and exit') || q.includes('walk out') ||
     q.includes('heading out')
   )
 }
 
 /**
- * Broad intent detection — catches food, toilet, parking, car, exit queries.
- * Returns a journey object or null.
+ * Detect journey query type and return a journey object or null.
+ * @param {string} query
+ * @param {object} stadiumState
+ * @param {object} fanContext
+ * @returns {object|null}
  */
 function detectJourneyQuery(query, stadiumState, fanContext) {
   const q = query.toLowerCase()
@@ -92,10 +86,8 @@ function detectJourneyQuery(query, stadiumState, fanContext) {
   const liveFood = stadiumState?.food || []
   const matchMin = stadiumState?.matchMin || 67
 
-  // ── EXIT INTENT — check first, before food round-trip ────────
-  // e.g. "buy a beer and leave the stadium"
+  // EXIT INTENT — check first
   if (detectExitIntent(q)) {
-    // Find if they want to stop at a stall on the way out
     let stallId = null, stallName = null
     for (const [id, data] of Object.entries(FOOD_REVIEWS)) {
       if (q.includes(id.toLowerCase()) || q.includes(data.name.toLowerCase())) {
@@ -115,7 +107,6 @@ function detectJourneyQuery(query, stadiumState, fanContext) {
     return { type: 'exitWithStop', stand, hasParking, stallId, stallName, matchMin, stadiumState }
   }
 
-  // Travel intent — any phrase implying "how long / can I get there"
   const travelIntent =
     q.includes('how long') || q.includes('how much time') ||
     q.includes('time will it take') || q.includes('time to get') ||
@@ -129,7 +120,6 @@ function detectJourneyQuery(query, stadiumState, fanContext) {
     q.includes('head to') || q.includes('go back') ||
     q.includes('walk to') || q.includes('exit to')
 
-  // Parking / car destination
   const isParking =
     q.includes('parking') || q.includes('my car') ||
     q.includes('the car') || q.includes('parked') ||
@@ -139,12 +129,10 @@ function detectJourneyQuery(query, stadiumState, fanContext) {
     (q.includes('park') && (travelIntent || hasParking)) ||
     (q.includes('exit') && hasParking && travelIntent)
 
-  // Toilet destination
   const hasToilet =
     q.includes('toilet') || q.includes('bathroom') ||
     q.includes('loo') || q.includes('restroom') || q.includes('wc')
 
-  // Food stall detection
   let stallId = null, stallName = null
   for (const [id, data] of Object.entries(FOOD_REVIEWS)) {
     if (q.includes(id.toLowerCase()) || q.includes(data.name.toLowerCase())) {
@@ -165,7 +153,6 @@ function detectJourneyQuery(query, stadiumState, fanContext) {
   if (!stallId && !hasToilet && !isParking) return null
   if (!travelIntent && !hasToilet && !isParking) return null
 
-  // ── PARKING JOURNEY ───────────────────────────────────────────
   if (isParking) {
     const myGate = STAND_GATE[stand]
     const gateWalk = GATE_WALK[stand]
@@ -179,7 +166,6 @@ function detectJourneyQuery(query, stadiumState, fanContext) {
     return { type: 'parking', stand, lot, myGate, gateWalk, gateQueue, gateLoad, lotWalk, lotWait, totalMin, matchMin, hasParking }
   }
 
-  // ── FOOD ROUND TRIP ───────────────────────────────────────────
   const walkMin = stallId ? (WALK_TIMES[stand]?.[stallId] ?? 3) : 0
   const queueMin = stallId ? (liveFood.find(f => f.id === stallId)?.wait ?? 5) : 0
   const eatMin = stallId ? 2 : 0
@@ -190,13 +176,18 @@ function detectJourneyQuery(query, stadiumState, fanContext) {
   return { type: 'food', stallId, stallName, walkMin, queueMin, eatMin, hasToilet, toiletWalk, toiletUse, totalMin, stand, matchMin }
 }
 
+/**
+ * Format a journey object into a human-readable answer string.
+ * @param {object} j - journey object from detectJourneyQuery
+ * @param {object} fanContext
+ * @returns {string}
+ */
 function formatJourneyAnswer(j, fanContext) {
   const standName = j.stand.charAt(0).toUpperCase() + j.stand.slice(1)
   const matchMin = j.matchMin || fanContext?.matchMin || 67
   const minsLeft = 90 - matchMin
   let lines = []
 
-  // ── EXIT WITH STALL STOP ─────────────────────────────────────
   if (j.type === 'exitWithStop') {
     const { stand, hasParking, stallId, stallName, stadiumState } = j
     const myGate = STAND_GATE[stand]
@@ -212,7 +203,7 @@ function formatJourneyAnswer(j, fanContext) {
     if (stallId) {
       const stallWalk = WALK_TIMES[stand]?.[stallId] ?? 3
       const stallQueue = liveFood.find(f => f.id === stallId)?.wait ?? 5
-      const totalToGate = stallWalk + stallQueue + 2 + gateWalk  // stall + queue + collect + walk to gate
+      const totalToGate = stallWalk + stallQueue + 2 + gateWalk
       const totalWithParking = hasParking ? totalToGate + gateQueue + lotWalk + lotWait : totalToGate + gateQueue
 
       lines.push(`Here's your exit route from ${standName} Stand — stopping at ${stallName} on the way out:\n`)
@@ -228,7 +219,6 @@ function formatJourneyAnswer(j, fanContext) {
         lines.push(`\n⏱ Total from seat to exit: ~${totalWithParking} minutes`)
       }
     } else {
-      // Exit only, no stall
       const totalToGate = gateWalk + gateQueue
       lines.push(`Here's your exit route from ${standName} Stand:\n`)
       lines.push(`🚶 Walk to Gate ${myGate}: ${gateWalk} min`)
@@ -241,19 +231,17 @@ function formatJourneyAnswer(j, fanContext) {
         lines.push(`\n⏱ Total to exit: ~${totalToGate} minutes`)
       }
     }
-
     if (minsLeft > 0) {
-      lines.push(`\n💡 ${minsLeft} min left in the match. Leaving now means missing the end — check the Exit tab at full time for your smart wave assignment.`)
+      lines.push(`\n💡 ${minsLeft} min left in the match. Check the Exit tab at full time for your smart wave assignment.`)
     } else {
       lines.push(`\n✅ Full time — your wave is active. Follow exit signs to Gate ${myGate}.`)
     }
     return lines.join('\n')
   }
 
-  // ── PARKING journey ─────────────────────────────────────────
   if (j.type === 'parking') {
     if (!j.hasParking) {
-      return `Your ticket doesn't include parking, so you'll be heading to public transport after the match. Nearest bus stop is at Gate D (South), taxi rank at Gate D, and cycle parking at Gate B. Walk from your stand to Gate ${j.myGate} takes about ${j.gateWalk} min.`
+      return `Your ticket doesn't include parking. Nearest bus stop is at Gate D (South), taxi rank at Gate D, and cycle parking at Gate B. Walk from your stand to Gate ${j.myGate} takes about ${j.gateWalk} min.`
     }
     lines.push(`Here's your journey from ${standName} Stand to your car (${j.lot} lot):\n`)
     lines.push(`🚶 Walk from seat to Gate ${j.myGate}: ${j.gateWalk} min`)
@@ -263,15 +251,14 @@ function formatJourneyAnswer(j, fanContext) {
     lines.push(`\n⏱ Total to reach your car: ~${j.totalMin} minutes`)
     if (matchMin < 90) {
       lines.push(`\n💡 Best time to leave: at or just before full time to beat the rush.`)
-      if (minsLeft > 0) lines.push(`Match has ~${minsLeft} min left. If you leave now you'll miss the end — wait for the whistle if you can.`)
+      if (minsLeft > 0) lines.push(`Match has ~${minsLeft} min left.`)
     } else {
-      lines.push(`\n✅ Full time. Your wave is called when your section is released — follow exit signs to Gate ${j.myGate} then ${j.lot}.`)
+      lines.push(`\n✅ Full time. Follow exit signs to Gate ${j.myGate} then ${j.lot}.`)
     }
     lines.push(`\n📍 Gate ${j.myGate} is your exit. Follow ${j.lot} parking signs from the gate.`)
     return lines.join('\n')
   }
 
-  // ── FOOD round trip ──────────────────────────────────────────
   if (j.stallId) {
     lines.push(`Here's your full round trip from ${standName} Stand to ${j.stallName} and back:\n`)
     lines.push(`🚶 Walk to ${j.stallName} (${j.stallId}): ${j.walkMin} min`)
@@ -289,7 +276,6 @@ function formatJourneyAnswer(j, fanContext) {
     return lines.join('\n')
   }
 
-  // ── TOILET only ──────────────────────────────────────────────
   if (j.hasToilet) {
     lines.push(`Toilet round trip from ${standName} Stand:\n`)
     lines.push(`🚶 Walk to nearest toilet: ${j.toiletWalk} min`)
@@ -307,8 +293,14 @@ function formatJourneyAnswer(j, fanContext) {
   return 'Journey information unavailable — please try asking more specifically.'
 }
 
-// ── System context for Gemini ─────────────────────────────────
+// ── System context builder ────────────────────────────────────
 
+/**
+ * Build Gemini system context string from live state and fan context.
+ * @param {object} stadiumState
+ * @param {object} fanContext
+ * @returns {string}
+ */
 function buildSystemContext(stadiumState, fanContext) {
   const { gates, food, matchMin, score } = stadiumState
   const stand = fanContext?.stand || 'north'
@@ -332,14 +324,20 @@ Round-trip times from their stand: ${walkCtx}
 Toilet: ${TOILET_WALK[stand]}min walk each way + ~2min use = ~${TOILET_WALK[stand] * 2 + 2}min total round trip
 View: ${v.description} Rated ${v.rating} stars.
 Atmosphere: ${atm.label} (${atm.score}/100) — ${atm.description}
+Parking: fan has parking = ${fanContext?.parking === 'yes' ? 'YES' : 'NO'}. Lot: ${STAND_LOT[stand]}. Total ~${GATE_WALK[stand] + 2 + PARKING_WALK[stand] + PARKING_LOT_WAIT[STAND_LOT[stand]]}min to car.
 
-Parking: fan has parking = ${fanContext?.parking === 'yes' ? 'YES' : 'NO'}. Lot: ${STAND_LOT[stand]}. Seat→Gate ${GATE_WALK[stand]}min + gate queue ~2min + Gate→Lot ${PARKING_WALK[stand]}min + barrier ${PARKING_LOT_WAIT[STAND_LOT[stand]]}min = ~${GATE_WALK[stand] + 2 + PARKING_WALK[stand] + PARKING_LOT_WAIT[STAND_LOT[stand]]}min total.
-
-IMPORTANT: If the fan says they want to LEAVE the stadium (keywords: leave, leaving, head out, go home, on the way out, and leave, then exit), treat it as an EXIT query — give them a route TO the gate/parking, NOT back to their seat. For food round-trips, give walk + queue + collect + walk back. For parking/car queries, break down: walk to gate + gate queue + walk to lot + barrier wait = total. Always give a specific minute total.`
+If the fan wants to LEAVE (leave, leaving, head out, go home, on the way out, and leave, then exit), treat it as EXIT — give route TO gate/parking, NOT back to seat.`
 }
 
 // ── Local AI fallback ─────────────────────────────────────────
 
+/**
+ * Rule-based local AI — used when no Gemini API key is set.
+ * @param {string} query
+ * @param {object} stadiumState
+ * @param {object} fanContext
+ * @returns {string}
+ */
 function localAIFallback(query, stadiumState, fanContext) {
   const q = query.toLowerCase()
   const { gates, food, parking, matchMin, score } = stadiumState
@@ -355,89 +353,92 @@ function localAIFallback(query, stadiumState, fanContext) {
   const busyGate = gates?.length ? gates.filter(g => !g.disabled).reduce((a, b) => a.load > b.load ? a : b) : { id: 'C', load: 90 }
   const freeLot = parking?.length ? parking.reduce((a, b) => a.free > b.free ? a : b) : { lot: 'P1', free: 142 }
 
-  // ── Journey / round-trip detection (highest priority) ────────
+  // Journey / round-trip detection (highest priority)
   const journey = detectJourneyQuery(query, stadiumState, fanContext)
   if (journey) return formatJourneyAnswer(journey, { ...fanContext, matchMin })
 
-  // ── Toilet alone (no round-trip phrasing) ────────────────────
   if (q.includes('toilet') || q.includes('bathroom') || q.includes('loo') || q.includes('restroom')) {
     const tw = TOILET_WALK[stand]
-    return `Nearest toilet from ${standName} Stand: Level 2 concourse entry, ${tw} min walk.\nRound trip: ~${tw * 2 + TOILET_USE} minutes total.\nCurrent wait: ~2 min. Avoid halftime (45') — queues spike to 8–10 min. Best to go now while it's quiet.`
+    return `Nearest toilet from ${standName} Stand: Level 2 concourse entry, ${tw} min walk.\nRound trip: ~${tw * 2 + TOILET_USE} minutes total.\nCurrent wait: ~2 min. Avoid halftime (45') — queues spike to 8–10 min.`
   }
 
-  // ── Food reviews ─────────────────────────────────────────────
   if (q.includes('review') || q.includes('feedback') || q.includes('rating') || (q.includes('food') && (q.includes('best') || q.includes('which') || q.includes('recommend') || q.includes('good')))) {
     const sorted = Object.values(FOOD_REVIEWS).sort((a, b) => b.rating - a.rating)
-    return `Top rated stalls today:\n\n${sorted[0].name} ⭐${sorted[0].rating}: "${sorted[0].feedback}"\n\n${sorted[1].name} ⭐${sorted[1].rating}: "${sorted[1].feedback}"\n\n${sorted[2].name} ⭐${sorted[2].rating}: "${sorted[2].feedback}"\n\nShortest queue now: ${bestFood.name} at ${bestFood.wait} min. Avoid ${worstFood.name} (${worstFood.wait} min).`
+    return `Top rated stalls today:\n\n${sorted[0].name} ⭐${sorted[0].rating}: "${sorted[0].feedback}"\n\n${sorted[1].name} ⭐${sorted[1].rating}: "${sorted[1].feedback}"\n\nShortest queue now: ${bestFood.name} at ${bestFood.wait} min.`
   }
 
-  // ── Specific stall lookup ────────────────────────────────────
   for (const [id, data] of Object.entries(FOOD_REVIEWS)) {
     if (q.includes(id.toLowerCase()) || q.includes(data.name.toLowerCase())) {
       const liveWait = liveFood.find(f => f.id === id)?.wait || '?'
       const walk = WALK_TIMES[stand]?.[id] ?? 3
-      return `${data.name} (${id}) — ⭐${data.rating} from ${data.reviews} reviews\n\n"${data.feedback}"\n\nTip: ${data.tip}\n\n📍 ${walk} min walk from your seat | ⏳ ${liveWait} min queue | 🔄 ~${walk * 2 + Number(liveWait) + 2} min round trip`
+      return `${data.name} (${id}) — ⭐${data.rating} from ${data.reviews} reviews\n\n"${data.feedback}"\n\nTip: ${data.tip}\n\n📍 ${walk} min walk | ⏳ ${liveWait} min queue | 🔄 ~${walk * 2 + Number(liveWait) + 2} min round trip`
     }
   }
 
-  // ── Specific food keywords ───────────────────────────────────
-  if (q.includes('burger')) { const w = WALK_TIMES[stand].F1; const q2 = liveFood.find(f => f.id === 'F1')?.wait || 12; return `F1 Burgers — ⭐${FOOD_REVIEWS.F1.rating}: "${FOOD_REVIEWS.F1.feedback}"\nTip: ${FOOD_REVIEWS.F1.tip}\n📍 ${w}min walk | ⏳ ${q2}min queue | 🔄 ~${w * 2 + q2 + 2}min round trip` }
-  if (q.includes('beer') || q.includes('drink') || q.includes('pint')) { const w = WALK_TIMES[stand].F2; const q2 = liveFood.find(f => f.id === 'F2')?.wait || 4; return `F2 Drinks Bar — ⭐${FOOD_REVIEWS.F2.rating} (top rated!): "${FOOD_REVIEWS.F2.feedback}"\nTip: ${FOOD_REVIEWS.F2.tip}\n📍 ${w}min walk | ⏳ ${q2}min queue | 🔄 ~${w * 2 + q2 + 2}min round trip` }
-  if (q.includes('pizza')) { const w = WALK_TIMES[stand].F3; const q2 = liveFood.find(f => f.id === 'F3')?.wait || 8; return `F3 Pizza — ⭐${FOOD_REVIEWS.F3.rating}: "${FOOD_REVIEWS.F3.feedback}"\nTip: ${FOOD_REVIEWS.F3.tip}\n📍 ${w}min walk | ⏳ ${q2}min queue | 🔄 ~${w * 2 + q2 + 2}min round trip` }
-  if (q.includes('snack') || q.includes('nacho')) { const w = WALK_TIMES[stand].F4; const q2 = liveFood.find(f => f.id === 'F4')?.wait || 2; return `F4 Snacks — ⭐${FOOD_REVIEWS.F4.rating} (fan favourite!): "${FOOD_REVIEWS.F4.feedback}"\nTip: ${FOOD_REVIEWS.F4.tip}\n📍 ${w}min walk | ⏳ ${q2}min queue | 🔄 ~${w * 2 + q2 + 2}min round trip` }
-  if (q.includes('ice cream')) { const w = WALK_TIMES[stand].F8; const q2 = liveFood.find(f => f.id === 'F8')?.wait || 3; return `F8 Ice Cream — ⭐${FOOD_REVIEWS.F8.rating} (highest rated!): "${FOOD_REVIEWS.F8.feedback}"\nTip: ${FOOD_REVIEWS.F8.tip}\n📍 ${w}min walk | ⏳ ${q2}min queue | 🔄 ~${w * 2 + q2 + 2}min round trip` }
-  if (q.includes('coffee')) { const w = WALK_TIMES[stand].F6; const q2 = liveFood.find(f => f.id === 'F6')?.wait || 14; return `F6 Coffee — ⭐${FOOD_REVIEWS.F6.rating}: "${FOOD_REVIEWS.F6.feedback}"\nTip: ${FOOD_REVIEWS.F6.tip}\n📍 ${w}min walk | ⏳ ${q2}min queue | 🔄 ~${w * 2 + q2 + 2}min round trip` }
+  if (q.includes('burger')) { const w = WALK_TIMES[stand].F1; const q2 = liveFood.find(f => f.id === 'F1')?.wait || 12; return `F1 Burgers — ⭐${FOOD_REVIEWS.F1.rating}: "${FOOD_REVIEWS.F1.feedback}"\nTip: ${FOOD_REVIEWS.F1.tip}\n📍 ${w}min walk | ⏳ ${q2}min queue` }
+  if (q.includes('beer') || q.includes('drink') || q.includes('pint')) { const w = WALK_TIMES[stand].F2; const q2 = liveFood.find(f => f.id === 'F2')?.wait || 4; return `F2 Drinks Bar — ⭐${FOOD_REVIEWS.F2.rating}: "${FOOD_REVIEWS.F2.feedback}"\nTip: ${FOOD_REVIEWS.F2.tip}\n📍 ${w}min walk | ⏳ ${q2}min queue` }
+  if (q.includes('pizza')) { const w = WALK_TIMES[stand].F3; const q2 = liveFood.find(f => f.id === 'F3')?.wait || 8; return `F3 Pizza — ⭐${FOOD_REVIEWS.F3.rating}: "${FOOD_REVIEWS.F3.feedback}"\nTip: ${FOOD_REVIEWS.F3.tip}\n📍 ${w}min walk | ⏳ ${q2}min queue` }
+  if (q.includes('snack') || q.includes('nacho')) { const w = WALK_TIMES[stand].F4; const q2 = liveFood.find(f => f.id === 'F4')?.wait || 2; return `F4 Snacks — ⭐${FOOD_REVIEWS.F4.rating}: "${FOOD_REVIEWS.F4.feedback}"\nTip: ${FOOD_REVIEWS.F4.tip}\n📍 ${w}min walk | ⏳ ${q2}min queue` }
+  if (q.includes('ice cream')) { const w = WALK_TIMES[stand].F8; const q2 = liveFood.find(f => f.id === 'F8')?.wait || 3; return `F8 Ice Cream — ⭐${FOOD_REVIEWS.F8.rating}: "${FOOD_REVIEWS.F8.feedback}"\nTip: ${FOOD_REVIEWS.F8.tip}\n📍 ${w}min walk | ⏳ ${q2}min queue` }
+  if (q.includes('coffee')) { const w = WALK_TIMES[stand].F6; const q2 = liveFood.find(f => f.id === 'F6')?.wait || 14; return `F6 Coffee — ⭐${FOOD_REVIEWS.F6.rating}: "${FOOD_REVIEWS.F6.feedback}"\nTip: ${FOOD_REVIEWS.F6.tip}\n📍 ${w}min walk | ⏳ ${q2}min queue` }
 
-  // ── View ─────────────────────────────────────────────────────
   if (q.includes('view') || q.includes('sightline') || q.includes('see from') || q.includes('my seat') || q.includes('from here')) {
     const v = VIEW_DATA[stand]
     return `View from ${standName} Stand, Row ${row}, Seat ${seat}:\n\n${v.description}\n\n${v.sightlines}\n\n⭐${v.rating} from ${v.reviews} fans. Tip: ${v.tip}`
   }
 
-  // ── Atmosphere ───────────────────────────────────────────────
-  if (q.includes('atmosphere') || q.includes('vibe') || q.includes('loud') || q.includes('chant') || q.includes('fan environment')) {
+  if (q.includes('atmosphere') || q.includes('vibe') || q.includes('loud') || q.includes('chant')) {
     const atm = FAN_ATMOSPHERE[stand]
     const v = VIEW_DATA[stand]
     return `${standName} Stand atmosphere: ${atm.label} — ${atm.score}/100\n\n${atm.description}\n\n${v.atmosphere}`
   }
 
   if (q.includes('best fan') || q.includes('best stand') || q.includes('where to sit') || q.includes('which stand')) {
-    return `Best stands by atmosphere:\n\n1. North Stand (98/100) — Ultra zone, drums, flags.\n2. South Stand (87/100) — Away end, loud and compact.\n3. West Stand (78/100) — Lively mix of fans.\n4. East Stand (62/100) — Relaxed, family-friendly.\n\nYou're in ${standName} Stand — ${FAN_ATMOSPHERE[stand].description}`
+    return `Best stands by atmosphere:\n\n1. North Stand (98/100)\n2. South Stand (87/100)\n3. West Stand (78/100)\n4. East Stand (62/100)\n\nYou're in ${standName} Stand — ${FAN_ATMOSPHERE[stand].description}`
   }
 
-  // ── Photo spots ──────────────────────────────────────────────
   if (q.includes('photo') || q.includes('picture') || q.includes('selfie') || q.includes('instagram')) {
-    return `Best photo spots at Nexus Arena:\n\n📸 North concourse entry arch — great wide stadium shot\n📸 Level 3 West walkway — full pitch panoramic at dusk\n📸 Your seat during warmups — players close up (South/North end)\n📸 Tunnel view when players walk out — Level 1 East concourse\n\nGolden hour light hits the West Stand roof around 7pm — stunning backdrop for selfies.`
+    return `Best photo spots:\n\n📸 North concourse entry arch\n📸 Level 3 West walkway — full pitch panoramic\n📸 Your seat during warmups\n📸 Tunnel view Level 1 East concourse\n\nGolden hour hits West Stand roof around 7pm.`
   }
 
-  // ── Score / match ────────────────────────────────────────────
   if (q.includes('score') || q.includes('match') || q.includes('goal') || q.includes('result')) {
     return `City FC ${score?.[0] ?? 2}–${score?.[1] ?? 1} United, ${matchMin}' played. ${90 - matchMin} minutes remaining. ${matchMin > 85 ? 'Almost full time!' : matchMin > 70 ? 'Final stages — exciting finish ahead.' : 'Game in full swing!'}`
   }
 
-  // ── Exit ─────────────────────────────────────────────────────
+  if (q.includes('gate') || q.includes('entry') || q.includes('enter')) {
+    return `Recommended gate for ${standName} Stand: Gate ${quietGate.id} at ${Math.round(quietGate.load)}% load — lowest queue right now. Avoid Gate ${busyGate.id} (${Math.round(busyGate.load)}% — busiest). Gate F (NW) is dedicated accessible entry.`
+  }
+
   if (q.includes('exit') || q.includes('leave') || q.includes('go home') || q.includes('after match')) {
-    return `Best exit for ${standName} Stand: Gate ${quietGate.id} at ${Math.round(quietGate.load)}% load — clearest right now. Avoid Gate ${busyGate.id} (${Math.round(busyGate.load)}%). Check the Exit tab when the final whistle goes — you'll get a personalised wave time to avoid the rush.`
+    return `Best exit for ${standName} Stand: Gate ${quietGate.id} at ${Math.round(quietGate.load)}% load. Avoid Gate ${busyGate.id} (${Math.round(busyGate.load)}%). Check the Exit tab at full time for your personalised wave assignment.`
   }
 
-  // ── Parking ──────────────────────────────────────────────────
   if (q.includes('park')) {
-    return `${freeLot.lot} has the most free bays: ${freeLot.free}. ${parking?.find(p => p.free <= 5) ? parking.find(p => p.free <= 5).lot + ' is nearly full — avoid.' : 'All lots currently have space.'} Exit via Gate ${quietGate.id} after full time.`
+    return `${freeLot.lot} has the most free bays: ${freeLot.free}. ${parking?.find(p => p.free <= 5) ? parking.find(p => p.free <= 5).lot + ' is nearly full — avoid.' : 'All lots have space.'} Exit via Gate ${quietGate.id} after full time.`
   }
 
-  // ── Food general ─────────────────────────────────────────────
   if (q.includes('food') || q.includes('eat') || q.includes('hungry') || q.includes('queue')) {
     const w = WALK_TIMES[stand]?.[bestFood.id] ?? 3
-    return `Shortest queue: ${bestFood.name} at ${bestFood.wait} min wait — ${w} min walk from your seat (~${w * 2 + bestFood.wait + 2} min round trip).\nAvoid ${worstFood.name} (${worstFood.wait} min queue right now). Ask "food reviews" for full ratings!`
+    return `Shortest queue: ${bestFood.name} at ${bestFood.wait} min wait — ${w} min walk from your seat (~${w * 2 + bestFood.wait + 2} min round trip).\nAvoid ${worstFood.name} (${worstFood.wait} min queue). Ask "food reviews" for full ratings!`
   }
 
-  return `I can help with:\n\n• Food stalls — queue times, reviews, round-trip time from your seat\n• Toilets — nearest + how long you'll be away\n• View from your seat\n• Fan atmosphere\n• Match score\n• Exit & parking\n\nJust ask anything!`
+  if (q.includes('disabled') || q.includes('wheelchair') || q.includes('accessibility')) {
+    return `Gate F (NW) is the dedicated accessible entry — priority lanes open. Lifts operational on all levels. Accessible seating in Rows A1-A3 on all stands. Staff steward at Gate F at all times.`
+  }
+
+  return `I can help with:\n\n• Food stalls — queue times, reviews, round-trip time\n• Toilets — nearest + time away\n• View from your seat\n• Fan atmosphere\n• Match score\n• Exit & parking\n\nJust ask anything!`
 }
 
-// ── Main export ───────────────────────────────────────────────
+// ── Main exports ──────────────────────────────────────────────
 
+/**
+ * Main AI query function. Uses Gemini if API key set, otherwise local fallback.
+ * @param {string} userQuery
+ * @param {object} stadiumState
+ * @param {object} fanContext
+ * @returns {Promise<string>}
+ */
 export async function queryStadiumAI(userQuery, stadiumState, fanContext) {
-  // Always check for journey query first — local logic is more accurate than Gemini for this
   const journey = detectJourneyQuery(userQuery, stadiumState, fanContext)
   if (journey) return formatJourneyAnswer(journey, { ...fanContext, matchMin: stadiumState?.matchMin })
 
@@ -450,7 +451,7 @@ export async function queryStadiumAI(userQuery, stadiumState, fanContext) {
         body: JSON.stringify({
           contents: [
             { role: 'user', parts: [{ text: systemContext }] },
-            { role: 'model', parts: [{ text: 'Got it! I have all the context including walk times, exit intent detection, and round-trip estimates. Ready to help.' }] },
+            { role: 'model', parts: [{ text: 'Got it! Ready to help.' }] },
             { role: 'user', parts: [{ text: userQuery }] },
           ],
           generationConfig: { temperature: 0.5, maxOutputTokens: 250, topP: 0.9 },
@@ -468,6 +469,11 @@ export async function queryStadiumAI(userQuery, stadiumState, fanContext) {
   return localAIFallback(userQuery, stadiumState, fanContext)
 }
 
+/**
+ * Generate a short crowd insight string for dashboard cards.
+ * @param {object} stadiumState
+ * @returns {string}
+ */
 export function generateCrowdInsight(stadiumState) {
   const { gates, zones, wristbands } = stadiumState
   if (!gates?.length || !zones?.length) return 'Crowd data loading...'

@@ -1,20 +1,95 @@
 /**
- * Pages.jsx — all tab page views
+ * Pages.jsx
+ * All tab page views for Stadium Nexus.
+ *
+ * Each exported component is wrapped with React.memo and
+ * has full PropTypes validation. Pure display components —
+ * no side-effects beyond local UI state.
+ *
+ * @module Pages
  */
 
-import React from 'react'
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect, memo } from 'react'
+import PropTypes from 'prop-types'
 import { Card, MetricRow, LoadBar, Badge } from './UI'
-import { loadClass, loadColor, formatNum, pct } from '../utils/helpers'
+import { loadClass, loadColor, formatNum, pct, quietestGate, busiestGate, bestFoodStall } from '../utils/helpers'
 import { getOptimalRoute, generateParkingGrid, STADIUM_CONFIG } from '../data/mockData'
 
+// ── Shared prop shapes ────────────────────────────────────────
+
+/** @type {import('prop-types').Requireable} */
+const GatePropType = PropTypes.shape({
+  id: PropTypes.string.isRequired,
+  loc: PropTypes.string.isRequired,
+  load: PropTypes.number.isRequired,
+  fans: PropTypes.number,
+  disabled: PropTypes.bool,
+})
+
+/** @type {import('prop-types').Requireable} */
+const ZonePropType = PropTypes.shape({
+  id: PropTypes.string.isRequired,
+  name: PropTypes.string.isRequired,
+  team: PropTypes.string.isRequired,
+  occ: PropTypes.number.isRequired,
+  cap: PropTypes.number.isRequired,
+})
+
+/** @type {import('prop-types').Requireable} */
+const FoodPropType = PropTypes.shape({
+  id: PropTypes.string.isRequired,
+  name: PropTypes.string.isRequired,
+  icon: PropTypes.string.isRequired,
+  wait: PropTypes.number.isRequired,
+  maxWait: PropTypes.number.isRequired,
+  location: PropTypes.string,
+})
+
+/** @type {import('prop-types').Requireable} */
+const AlertPropType = PropTypes.shape({
+  level: PropTypes.oneOf(['ok', 'warn', 'danger']).isRequired,
+  msg: PropTypes.string.isRequired,
+  time: PropTypes.string.isRequired,
+})
+
+/** @type {import('prop-types').Requireable} */
+const StatePropType = PropTypes.shape({
+  gates: PropTypes.arrayOf(GatePropType),
+  zones: PropTypes.arrayOf(ZonePropType),
+  food: PropTypes.arrayOf(FoodPropType),
+  alerts: PropTypes.arrayOf(AlertPropType),
+  wristbands: PropTypes.shape({
+    total: PropTypes.number,
+    tunnel: PropTypes.number,
+    seated: PropTypes.number,
+    concourse: PropTypes.number,
+  }),
+  parking: PropTypes.arrayOf(PropTypes.shape({
+    lot: PropTypes.string.isRequired,
+    name: PropTypes.string.isRequired,
+    free: PropTypes.number.isRequired,
+    total: PropTypes.number.isRequired,
+  })),
+  matchMin: PropTypes.number,
+  score: PropTypes.arrayOf(PropTypes.number),
+  cv: PropTypes.array,
+})
+
 // ── MAP page ─────────────────────────────────────────────────
-export function MapPage({ state, crowdInsight }) {
+
+/**
+ * Live gate status, zone occupancy, wristband counters, and
+ * the AI crowd insight string.
+ *
+ * @param {{ state: object, crowdInsight: string }} props
+ */
+export const MapPage = memo(function MapPage({ state, crowdInsight }) {
   const now = new Date().toLocaleTimeString('en-GB', { hour12: false })
+
   return (
     <div className="rpanel">
       <Card title="LIVE GATE STATUS" extra={`UPDATED ${now}`}>
-        {state.gates?.map(g => {
+        {(state.gates ?? []).map(g => {
           const cls = loadClass(g.load)
           return (
             <div key={g.id}>
@@ -36,10 +111,12 @@ export function MapPage({ state, crowdInsight }) {
       </Card>
 
       <Card title="ZONE OCCUPANCY">
-        {state.zones?.map(z => {
+        {(state.zones ?? []).map(z => {
           const p = pct(z.occ, z.cap)
           const cls = loadClass(p)
-          const teamColor = z.team === 'HOME' ? '#4a90d9' : z.team === 'AWAY' ? '#d94a4a' : '#4a9a4a'
+          const teamColor =
+            z.team === 'HOME' ? '#4a90d9' :
+              z.team === 'AWAY' ? '#d94a4a' : '#4a9a4a'
           return (
             <div key={z.id}>
               <div className="mrow">
@@ -60,33 +137,56 @@ export function MapPage({ state, crowdInsight }) {
         <div className="mrow"><span className="mlabel">In tunnels now</span><span className="mval warn">{formatNum(state.wristbands?.tunnel)}</span></div>
         <div className="mrow"><span className="mlabel">Seated</span><span className="mval ok">{formatNum(state.wristbands?.seated)}</span></div>
         <div className="mrow"><span className="mlabel">Concourse</span><span className="mval">{formatNum(state.wristbands?.concourse)}</span></div>
-        <LoadBar value={state.wristbands?.seated} max={state.wristbands?.total} />
+        <LoadBar value={state.wristbands?.seated ?? 0} max={state.wristbands?.total ?? 1} />
       </Card>
 
       <Card title="AI CROWD INSIGHT">
-        <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6, fontFamily: "'Share Tech Mono'" }}>
+        <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6, fontFamily: "'Share Tech Mono'" }}
+          role="status" aria-live="polite">
           {crowdInsight}
         </p>
       </Card>
     </div>
   )
+})
+
+MapPage.displayName = 'MapPage'
+
+MapPage.propTypes = {
+  /** Full live stadium state snapshot. */
+  state: StatePropType.isRequired,
+  /** AI-generated crowd insight string. */
+  crowdInsight: PropTypes.string.isRequired,
+}
+
+MapPage.defaultProps = {
+  crowdInsight: 'Analysing crowd data…',
 }
 
 // ── ROUTE page ───────────────────────────────────────────────
-export function RoutePage({ state }) {
-  const [showRoute, setShowRoute] = useState(false)
-  const route = getOptimalRoute('A', 'North', state.gates ?? [])
-  const quietGate = state.gates?.filter(g => !g.disabled).reduce((a, b) => a.load < b.load ? a : b)
+
+/**
+ * Displays the fan's ticket details, AI-computed optimal route,
+ * and alternative gate options.
+ *
+ * @param {{ state: object, fan: object }} props
+ */
+export const RoutePage = memo(function RoutePage({ state, fan }) {
+  const stand = fan?.stand ?? 'north'
+  const gateId = fan?.gate ?? 'A'
+  const route = getOptimalRoute(gateId, stand, state.gates ?? [])
+  const quietest = quietestGate(state.gates ?? [])
+  const busiest = busiestGate(state.gates ?? [])
 
   return (
     <div className="rpanel">
       <Card title="YOUR TICKET">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           {[
-            ['STAND', 'NORTH B'],
-            ['ROW / SEAT', '14 / 22'],
-            ['ASSIGNED ENTRY', <span style={{ color: 'var(--accent2)', fontFamily: "'Share Tech Mono'", fontSize: 14 }}>GATE A</span>],
-            ['EST. WALK', <span style={{ color: 'var(--warn)', fontFamily: "'Share Tech Mono'", fontSize: 14 }}>4 MIN</span>],
+            ['STAND', (fan?.stand ?? 'north').toUpperCase()],
+            ['ROW / SEAT', `${fan?.row ?? '14'} / ${fan?.seat ?? '22'}`],
+            ['ASSIGNED ENTRY', <span key="gate" style={{ color: 'var(--accent2)', fontFamily: "'Share Tech Mono'", fontSize: 14 }}>GATE {gateId}</span>],
+            ['EST. WALK', <span key="walk" style={{ color: 'var(--warn)', fontFamily: "'Share Tech Mono'", fontSize: 14 }}>{fan?.walkMin ?? 4} MIN</span>],
           ].map(([label, val]) => (
             <div key={label}>
               <div style={{ fontSize: 10, color: 'var(--text2)' }}>{label}</div>
@@ -119,28 +219,51 @@ export function RoutePage({ state }) {
           <span className="mlabel">Gate F (NW) — disabled route</span>
           <span className="mval ok">♿ Priority</span>
         </div>
-        {quietGate && (
+        {quietest && (
           <div className="mrow">
             <span className="mlabel">AI best gate right now</span>
-            <span className="mval ok">Gate {quietGate.id} ({quietGate.load.toFixed(0)}%)</span>
+            <span className="mval ok">Gate {quietest.id} ({quietest.load.toFixed(0)}%)</span>
+          </div>
+        )}
+        {busiest && (
+          <div className="mrow">
+            <span className="mlabel">Avoid — highest load</span>
+            <span className="mval danger">Gate {busiest.id} ({busiest.load.toFixed(0)}%)</span>
           </div>
         )}
       </Card>
-
-      <button
-        onClick={() => setShowRoute(v => !v)}
-        style={{ margin: '0 10px 10px', background: 'var(--accent)', color: '#000', border: 'none', padding: 8, width: 'calc(100% - 20px)', fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: 1, borderRadius: 3, cursor: 'pointer' }}
-        aria-pressed={showRoute}
-      >
-        {showRoute ? 'HIDE ROUTE ON MAP' : 'SHOW ROUTE ON MAP'}
-      </button>
     </div>
   )
+})
+
+RoutePage.displayName = 'RoutePage'
+
+RoutePage.propTypes = {
+  state: StatePropType.isRequired,
+  /** Fan ticket data. */
+  fan: PropTypes.shape({
+    name: PropTypes.string,
+    stand: PropTypes.string,
+    gate: PropTypes.string,
+    row: PropTypes.string,
+    seat: PropTypes.string,
+    walkMin: PropTypes.number,
+  }),
 }
 
+RoutePage.defaultProps = { fan: {} }
+
 // ── MATCH page ───────────────────────────────────────────────
-export function MatchPage({ state }) {
-  const { home, away, homeColor, awayColor } = STADIUM_CONFIG.match
+
+/**
+ * Live score banner, fan zone summary, best viewing spots,
+ * and live match event timeline.
+ *
+ * @param {{ state: object }} props
+ */
+export const MatchPage = memo(function MatchPage({ state }) {
+  const { home, away } = STADIUM_CONFIG.match
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       <div className="match-banner" role="banner" aria-label="Live match score">
@@ -163,29 +286,43 @@ export function MatchPage({ state }) {
         <Card title="FAN ZONE SUMMARY">
           {STADIUM_CONFIG.zones.map((z, i) => {
             const occ = state.zones?.[i]?.occ ?? z.cap * 0.87
+            const teamColor =
+              z.team === 'HOME' ? '#4a90d9' :
+                z.team === 'AWAY' ? '#d94a4a' : '#4a9a4a'
             return (
               <div className="mrow" key={z.id}>
-                <span className="mlabel">{z.name} <span style={{ color: z.team === 'HOME' ? '#4a90d9' : z.team === 'AWAY' ? '#d94a4a' : '#4a9a4a', fontSize: 10 }}>{z.team}</span></span>
+                <span className="mlabel">
+                  {z.name}{' '}
+                  <span style={{ color: teamColor, fontSize: 10 }}>{z.team}</span>
+                </span>
                 <span className="mval">{formatNum(Math.round(occ))} seats</span>
               </div>
             )
           })}
-          <div className="mrow"><span className="mlabel">Separated by</span><span className="mval ok">Buffer Zone Row J</span></div>
+          <div className="mrow">
+            <span className="mlabel">Separated by</span>
+            <span className="mval ok">Buffer Zone Row J</span>
+          </div>
         </Card>
 
         <Card title="★ BEST VIEWING SPOTS">
           {STADIUM_CONFIG.bestViewSpots.map(s => (
             <div className="mrow" key={s.area}>
               <span className="mlabel" style={{ fontSize: 11 }}>{s.area}</span>
-              <span className="mval" style={{ color: s.rating >= 4.5 ? 'var(--accent2)' : s.rating >= 4 ? 'var(--warn)' : 'var(--text2)' }}>
-                ⭐ {s.rating} <span style={{ fontSize: 10, color: 'var(--text3)' }}>({s.reviews})</span>
+              <span className="mval" style={{
+                color: s.rating >= 4.5 ? 'var(--accent2)' :
+                  s.rating >= 4 ? 'var(--warn)' : 'var(--text2)',
+              }}>
+                ⭐ {s.rating}{' '}
+                <span style={{ fontSize: 10, color: 'var(--text3)' }}>({s.reviews})</span>
               </span>
             </div>
           ))}
         </Card>
 
         <Card title="LIVE MATCH EVENTS">
-          <div style={{ fontFamily: "'Share Tech Mono'", fontSize: 11, lineHeight: 1.8, color: 'var(--text2)' }}>
+          <div style={{ fontFamily: "'Share Tech Mono'", fontSize: 11, lineHeight: 1.8, color: 'var(--text2)' }}
+            role="log" aria-label="Match event timeline" aria-live="polite">
             {[
               [`${state.matchMin}'`, '⚽ City FC penalty — 2:1'],
               ['63\'', '🟡 Yellow card — United #8'],
@@ -201,25 +338,36 @@ export function MatchPage({ state }) {
       </div>
     </div>
   )
-}
+})
+
+MatchPage.displayName = 'MatchPage'
+MatchPage.propTypes = { state: StatePropType.isRequired }
 
 // ── PARKING page ─────────────────────────────────────────────
-export function ParkingPage({ state }) {
+
+/**
+ * Live parking bay availability, visual bay map,
+ * and exit routing summary.
+ *
+ * @param {{ state: object }} props
+ */
+export const ParkingPage = memo(function ParkingPage({ state }) {
   const [grid, setGrid] = useState([])
   const activeLot = state.parking?.[0] ?? { lot: 'P1', name: 'North', free: 142, total: 400 }
 
   useEffect(() => {
     setGrid(generateParkingGrid(activeLot))
-  }, [state.parking?.[0]?.free])
+  }, [activeLot.free, activeLot.lot])
 
   return (
     <div className="rpanel">
       <Card title="PARKING OVERVIEW">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
-          {state.parking?.map(p => {
+          {(state.parking ?? []).map(p => {
             const cls = p.free <= 5 ? 'danger' : p.free <= 30 ? 'warn' : 'ok'
             return (
-              <div className="cv-cell" key={p.lot}>
+              <div className="cv-cell" key={p.lot}
+                role="region" aria-label={`${p.lot} ${p.name}: ${p.free} bays free`}>
                 <div className="cv-label">{p.lot} {p.name.toUpperCase()}</div>
                 <div className={`cv-val ${cls}`}>{p.free} free</div>
                 <LoadBar value={p.total - p.free} max={p.total} />
@@ -258,27 +406,39 @@ export function ParkingPage({ state }) {
       </Card>
     </div>
   )
-}
+})
+
+ParkingPage.displayName = 'ParkingPage'
+ParkingPage.propTypes = { state: StatePropType.isRequired }
 
 // ── FOOD page ────────────────────────────────────────────────
-export function FoodPage({ state }) {
+
+/**
+ * Real-time food stall queue tracker with AI recommendation.
+ *
+ * @param {{ state: object }} props
+ */
+export const FoodPage = memo(function FoodPage({ state }) {
   const food = state.food ?? []
-  const best = food.length ? food.reduce((a, b) => a.wait < b.wait ? a : b) : null
+  const best = bestFoodStall(food)
 
   return (
     <div className="rpanel">
       <Card title="FOOD STALL QUEUE TRACKER">
         {food.map(f => {
-          const p = Math.round(f.wait / f.maxWait * 100)
+          const p = Math.round((f.wait / f.maxWait) * 100)
           const col = loadColor(p)
           return (
-            <div className="stall-row" key={f.id} role="listitem" aria-label={`${f.name}: ${f.wait} minute wait`}>
+            <div className="stall-row" key={f.id}
+              role="listitem" aria-label={`${f.name}: ${f.wait} minute wait`}>
               <span style={{ fontSize: 14 }}>{f.icon}</span>
               <div className="stall-name">{f.id} — {f.name} · {f.location}</div>
               <div className="stall-bar">
                 <div className="stall-fill" style={{ width: `${p}%`, background: col }} />
               </div>
-              <div className={`stall-queue ${loadClass(p)}`} aria-label={`${f.wait} minutes`}>{f.wait}m</div>
+              <div className={`stall-queue ${loadClass(p)}`} aria-label={`${f.wait} minutes`}>
+                {f.wait}m
+              </div>
             </div>
           )
         })}
@@ -287,19 +447,32 @@ export function FoodPage({ state }) {
       {best && (
         <Card title="AI RECOMMENDATION">
           <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6, fontFamily: "'Share Tech Mono'" }}>
-            ⬡ Nearest low-queue: <strong style={{ color: 'var(--accent2)' }}>{best.id} — {best.name}</strong> ({best.wait} min wait, ~120m from your seat via concourse).<br /><br />
-            ⚠ Stalls with 12+ min wait: avoid next 20 min. AI predicts queue relief when second-half crowd settles.
+            ⬡ Nearest low-queue:{' '}
+            <strong style={{ color: 'var(--accent2)' }}>{best.id} — {best.name}</strong>{' '}
+            ({best.wait} min wait, ~120m from your seat via concourse).<br /><br />
+            ⚠ Stalls with 12+ min wait: avoid next 20 min. AI predicts queue relief when
+            second-half crowd settles.
           </p>
         </Card>
       )}
     </div>
   )
-}
+})
+
+FoodPage.displayName = 'FoodPage'
+FoodPage.propTypes = { state: StatePropType.isRequired }
 
 // ── CV MONITOR page ──────────────────────────────────────────
-export function CVPage({ state }) {
-  const tunnelFeeds = state.cv?.filter(c => c.type === 'tunnel') ?? []
-  const seatFeeds = state.cv?.filter(c => c.type === 'seats') ?? []
+
+/**
+ * Computer-vision tunnel camera feeds, seat occupancy,
+ * and crowd flow velocity data.
+ *
+ * @param {{ state: object }} props
+ */
+export const CVPage = memo(function CVPage({ state }) {
+  const tunnelFeeds = (state.cv ?? []).filter(c => c.type === 'tunnel')
+  const seatFeeds = (state.cv ?? []).filter(c => c.type === 'seats')
   const flowData = [
     { zone: 'Gate A Tunnel', flow: 420 },
     { zone: 'Gate B Tunnel', flow: 680 },
@@ -315,7 +488,8 @@ export function CVPage({ state }) {
           {tunnelFeeds.map(c => {
             const cls = c.count > 300 ? 'danger' : c.count > 200 ? 'warn' : 'ok'
             return (
-              <div className="cv-cell" key={c.cam} role="region" aria-label={`${c.cam} ${c.zone}: ${c.count} persons`}>
+              <div className="cv-cell" key={c.cam}
+                role="region" aria-label={`${c.cam} ${c.zone}: ${c.count} persons`}>
                 <div className="cv-label">{c.cam} · {c.zone}</div>
                 <div className={`cv-val ${cls}`}>{c.count}</div>
                 <div style={{ fontSize: 9, color: 'var(--text2)' }}>persons detected</div>
@@ -326,18 +500,15 @@ export function CVPage({ state }) {
       </Card>
 
       <Card title="SEAT OCCUPANCY BY BLOCK">
-        {seatFeeds.map(c => {
-          const cls = loadClass(c.fill)
-          return (
-            <div key={c.cam}>
-              <div className="mrow">
-                <span className="mlabel">{c.zone}</span>
-                <span className={`mval ${cls}`}>{c.fill}%</span>
-              </div>
-              <LoadBar value={c.fill} />
+        {seatFeeds.map(c => (
+          <div key={c.cam}>
+            <div className="mrow">
+              <span className="mlabel">{c.zone}</span>
+              <span className={`mval ${loadClass(c.fill)}`}>{c.fill}%</span>
             </div>
-          )
-        })}
+            <LoadBar value={c.fill} />
+          </div>
+        ))}
       </Card>
 
       <Card title="CROWD FLOW VELOCITY">
@@ -353,10 +524,20 @@ export function CVPage({ state }) {
       </Card>
     </div>
   )
-}
+})
+
+CVPage.displayName = 'CVPage'
+CVPage.propTypes = { state: StatePropType.isRequired }
 
 // ── STAFF page ───────────────────────────────────────────────
-export function StaffPage({ state }) {
+
+/**
+ * Staff operations view: incident alerts, crowd density heatmap,
+ * and active staff deployments.
+ *
+ * @param {{ state: object }} props
+ */
+export const StaffPage = memo(function StaffPage({ state }) {
   const densityZones = [
     { zone: 'North Stand', density: pct(state.zones?.[0]?.occ ?? 24800, state.zones?.[0]?.cap ?? 28400) },
     { zone: 'South Stand', density: pct(state.zones?.[1]?.occ ?? 7100, state.zones?.[1]?.cap ?? 8200) },
@@ -374,13 +555,17 @@ export function StaffPage({ state }) {
             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{
                 width: 6, height: 6, borderRadius: '50%',
-                background: a.level === 'danger' ? 'var(--danger)' : a.level === 'warn' ? 'var(--warn)' : 'var(--accent2)',
+                background:
+                  a.level === 'danger' ? 'var(--danger)' :
+                    a.level === 'warn' ? 'var(--warn)' : 'var(--accent2)',
                 flexShrink: 0,
                 animation: a.level !== 'ok' ? 'blink 1.2s infinite' : 'none',
               }} />
               <span className="mlabel">{a.msg}</span>
             </span>
-            <span style={{ fontFamily: "'Share Tech Mono'", fontSize: 10, color: 'var(--text2)' }}>{a.time}</span>
+            <span style={{ fontFamily: "'Share Tech Mono'", fontSize: 10, color: 'var(--text2)' }}>
+              {a.time}
+            </span>
           </div>
         ))}
       </Card>
@@ -388,7 +573,8 @@ export function StaffPage({ state }) {
       <Card title="CROWD DENSITY HEATMAP">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
           <span style={{ fontSize: 10, color: 'var(--accent2)' }}>LOW</span>
-          <div style={{ flex: 1, margin: '0 8px', height: 8, borderRadius: 2, background: 'linear-gradient(to right,#00ff9d,#ffb800,#ff4444)' }} aria-hidden="true" />
+          <div style={{ flex: 1, margin: '0 8px', height: 8, borderRadius: 2, background: 'linear-gradient(to right,#00ff9d,#ffb800,#ff4444)' }}
+            aria-hidden="true" />
           <span style={{ fontSize: 10, color: 'var(--danger)' }}>HIGH</span>
         </div>
         {densityZones.map(d => (
@@ -418,4 +604,7 @@ export function StaffPage({ state }) {
       </Card>
     </div>
   )
-}
+})
+
+StaffPage.displayName = 'StaffPage'
+StaffPage.propTypes = { state: StatePropType.isRequired }

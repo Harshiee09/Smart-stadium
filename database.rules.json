@@ -1,0 +1,29 @@
+{
+  "rules": {
+    "stadium": {
+      "live": {
+        ".read": true,
+        ".write": true
+      },
+      "fans": {
+        "$fanId": {
+          ".read": true,
+          ".write": true,
+          ".validate": "newData.hasChildren(['stand', '_joinedAt'])"
+        }
+      },
+      "alerts": {
+        ".read": true,
+        ".write": true
+      },
+      "config": {
+        ".read": true,
+        ".write": true
+      },
+      "analytics": {
+        ".read": false,
+        ".write": true
+      }
+    }
+  }
+}
